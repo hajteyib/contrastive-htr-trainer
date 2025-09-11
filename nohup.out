@@ -1,0 +1,8 @@
+usage: main.py [-h] [--config CONFIG] [--preset PRESET] [--resume RESUME]
+               [--device DEVICE] [--experiment-name EXPERIMENT_NAME]
+               [--data-path DATA_PATH] [--output-dir OUTPUT_DIR] [--dry-run]
+main.py: error: argument --experiment-name: expected one argument
+usage: main.py [-h] [--config CONFIG] [--preset PRESET] [--resume RESUME]
+               [--device DEVICE] [--experiment-name EXPERIMENT_NAME]
+               [--data-path DATA_PATH] [--output-dir OUTPUT_DIR] [--dry-run]
+main.py: error: argument --experiment-name: expected one argument

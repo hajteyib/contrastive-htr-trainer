@@ -1,0 +1,27 @@
+# Expérience A : Baseline avec régularisation modérée
+seed: 42
+experiment:
+  name: "exp_A_baseline"
+  output_dir: "/sps/liris/eebou/htr_outputs"
+  log_dir: "/sps/liris/eebou/htr_logs"
+model:
+  global_dim: 512
+data:
+  data_list_file: "/sps/liris/eebou/datasets/htr_valid_paths.txt"
+  target_height: 128
+  batch_size: 256
+  num_workers: 16
+loss:
+  global_temp: 0.2
+  queue_size: 16384
+training:
+  num_epochs: 50
+  learning_rate: 3e-4
+  weight_decay: 5e-4
+  momentum: 0.996
+  warmup_epochs: 5
+  validate_every_n_epochs: 1
+  early_stopping: { enabled: true, patience: 10, monitor: "val_contrastive_acc", mode: "max" }
+optimizer: { type: "adamw" }
+scheduler: { type: "cosine", min_lr: 1e-6 }
+advanced: { use_amp: true, compile_model: true }

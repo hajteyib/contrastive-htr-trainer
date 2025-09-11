@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//home/jovyan/buckets/ehsebou-manuscrits/Paragraph-Images/**)",
+      "Read(//home/jovyan/buckets/ehsebou-manuscrits/Paragraph-Images/**)",
+      "Bash(python:*)",
+      "Bash(PYTHONPATH=/home/jovyan/Contrastive-project python src/main.py --dry-run --data-path /home/jovyan/buckets/ehsebou-manuscrits/Paragraph-Images --preset quick_test)",
+      "Bash(timeout:*)",
+      "Bash(dmesg:*)",
+      "Bash(nvidia-smi:*)",
+      "Read(//home/jovyan/buckets/ehsebou-manuscrits/Paragraph-Images/**)",
+      "Bash(grep:*)",
+      "Bash(kill:*)",
+      "Bash(pkill:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
