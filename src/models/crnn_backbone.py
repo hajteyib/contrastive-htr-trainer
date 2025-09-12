@@ -2,6 +2,7 @@
 
 import torch
 import torch.nn as nn
+from typing import Dict, Tuple
 
 class ResidualBlock(nn.Module):
     """Un bloc résiduel simple mais efficace, la brique de base de notre CNN."""
@@ -81,28 +82,17 @@ class CRNN_CNN_Backbone(nn.Module):
         features = self.layer5(out) # Sortie ex: [B, 512, 4, W_out]
         return features
 
-    def forward_contrastive(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
+    def forward_contrastive(self, x: torch.Tensor) -> dict: # Utiliser dict au lieu de Dict
         """Forward pour le pré-entraînement. Ne retourne qu'une feature globale."""
         features = self.forward_features(x)
         global_feature = self.contrastive_head(features)
-        # On ne produit plus de patchs pour simplifier et accélérer
         return {'global': global_feature, 'patches': torch.empty(0)}
     
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, int, int]:
+    def forward(self, x: torch.Tensor) -> tuple: # Utiliser tuple au lieu de Tuple
         """Forward pour la tâche OCR supervisée."""
-        # Pour le fine-tuning, on prend une image RGB
-        if x.shape[1] == 3:
-            x = x.mean(dim=1, keepdim=True)
-            
         features = self.forward_features(x)
         B, C, H, W = features.shape
-        
-        # Permuter pour avoir la largeur comme dimension de séquence : [B, W, H, C]
         features = features.permute(0, 3, 1, 2).contiguous()
-        # Aplatir les dimensions de hauteur et de canaux : [B, W, H*C]
         features = features.view(B, W, H * C)
-        
-        # Projection finale
-        features = self.supervised_head(features) # [B, W, supervised_output_dim]
-        
+        features = self.supervised_head(features)
         return features, 1, W # On retourne H=1 car elle est maintenant encodée dans la dimension des features

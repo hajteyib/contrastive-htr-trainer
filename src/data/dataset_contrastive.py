@@ -5,11 +5,11 @@ from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import cv2
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional , Dict 
 import random
 from PIL import Image
 from torchvision import transforms
-import os
+import os 
 
 class SimCLR_Transform:
     """
