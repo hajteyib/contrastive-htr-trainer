@@ -17,18 +17,22 @@
 
 # Créer le dossier de logs Slurm
 mkdir -p slurm_logs
-
-echo "--- Démarrage du Job ---"
+echo "--- Job Information ---"
 echo "Job ID: $SLURM_JOB_ID | Node: $SLURMD_NODENAME"
+echo "-----------------------"
 
-# 1. Préparation de l'environnement
-echo "Activation de l'environnement..."
+echo "Chargement du module Python..."
 module purge
 module load python
+
+echo "Activation de l'environnement virtuel..."
 source /sps/liris/eebou/htr_env/bin/activate
 
-# 2. Lancement du script Python
-echo "Lancement de l'expérience A..."
-python src/main_contrastive.py --config src/configs/exp_A_baseline.yaml
+echo "Lancement de l'Expérience A..."
+echo "--- DEBUT DE LA SORTIE PYTHON ---"
 
-echo "--- Fin du Job ---"
+# Utilisation du chemin absolu pour une robustesse maximale
+/sps/liris/eebou/htr_env/bin/python src/main_contrastive.py --config src/configs/exp_A_baseline.yaml
+
+echo "--- FIN DE LA SORTIE PYTHON ---"
+echo "Fin du job."

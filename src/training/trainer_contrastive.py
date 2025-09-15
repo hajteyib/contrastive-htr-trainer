@@ -141,14 +141,38 @@ class ContrastiveTrainer:
         
         return {'train_loss': total_loss / len(self.train_dataloader)}
 
-    def validate_epoch(self):
+    def validate_epoch(self) -> Dict[str, float]:
+        """Évalue le modèle sur le set de validation pour la perte ET la précision."""
         self.model.eval()
-        val_metrics = {}
+        val_losses = defaultdict(list)
         
-        # Calculer la précision contrastive
-        acc = calculate_contrastive_accuracy(self.model, self.val_dataloader, self.device, self.use_amp)
-        val_metrics['val_contrastive_acc'] = acc
+        # --- CALCUL DE LA VAL LOSS ---
+        with torch.no_grad():
+            pbar_loss = tqdm(self.val_dataloader, desc="Calculating Val Loss", leave=False)
+            for batch in pbar_loss:
+                if batch is None: continue
+                
+                view1 = batch['view1'].to(self.device, non_blocking=True)
+                view2 = batch['view2'].to(self.device, non_blocking=True)
+                
+                with autocast(enabled=self.use_amp):
+                    anchor_features = self.model.forward_contrastive(view1)
+                    # Utiliser le momentum_encoder pour une mesure cohérente avec l'entraînement
+                    positive_features = self.momentum_encoder.forward_contrastive(view2)
+                    loss_dict = self.criterion(anchor_features, positive_features)
+
+                for key, value in loss_dict.items():
+                    val_losses[key].append(value.item())
         
+        val_metrics = {f"val_{key}": np.mean([v for v in values if not np.isnan(v)]) for key, values in val_losses.items()}
+        
+        # --- CALCUL DE LA VAL ACCURACY ---
+        # On appelle la fonction séparée qui est déjà optimisée pour cela
+        self.logger.info("Calculating Contrastive Accuracy on Validation Set...")
+        contrastive_acc = calculate_contrastive_accuracy(self.model, self.val_dataloader, self.device, self.use_amp)
+        val_metrics['val_contrastive_acc'] = contrastive_acc
+        
+        self.logger.info(f"📊 Val Loss: {val_metrics.get('val_total_loss', 'N/A'):.4f} | Val Acc: {val_metrics.get('val_contrastive_acc', 'N/A'):.2f}%")
         return val_metrics
         
     def save_checkpoint(self, is_best=False):
