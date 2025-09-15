@@ -13,42 +13,22 @@
 #SBATCH --mail-type=ALL
 #SBATCH --licenses=sps
 
-# --- SCRIPT D'EXÉCUTION ROBUSTE ---
-set -euxo pipefail
+# --- SCRIPT D'EXÉCUTION DIRECT ---
 
+# Créer le dossier de logs Slurm
 mkdir -p slurm_logs
 
-echo "--- Job Information ---"
+echo "--- Démarrage du Job ---"
 echo "Job ID: $SLURM_JOB_ID | Node: $SLURMD_NODENAME"
-echo "-----------------------"
 
-# --- PRÉPARATION DE L'ENVIRONNEMENT ---
-echo "1. Chargement du module Python..."
+# 1. Préparation de l'environnement
+echo "Activation de l'environnement..."
 module purge
 module load python
-echo "Python
-version: $(python --version)"
+source /sps/liris/eebou/htr_env/bin/activate
 
-# --- VÉRIFICATION ET ACTIVATION DE L'ENVIRONNEMENT VIRTUEL ---
-VENV_PATH="/sps/liris/eebou/htr_env"
-echo "2. Vérification de l'environnement virtuel à : $VENV_PATH"
-if [ ! -f "$VENV_PATH/bin/activate" ]; then
-    echo "ERREUR: L'environnement virtuel n'a pas été trouvé. Veuillez le créer."
-    exit 1
-fi
-source "$VENV_PATH/bin/activate"
-echo "Environnement activé. Python executable: $(which python)"
-
-# --- VÉRIFICATION DES DÉPENDANCES ---
-echo "3. Vérification de la présence de PyTorch..."
-python -c "import torch; print(f'PyTorch version: {torch.__version__}'); print(f'CUDA disponible: {torch.cuda.is_available()}')"
-if [ $? -ne 0 ]; then
-    echo "ERREUR: PyTorch n'est pas installé dans l'environnement virtuel."
-    exit 1
-fi
-
-# --- LANCEMENT DU SCRIPT PYTHON ---
-echo "4. Lancement de l'Expérience A..."
+# 2. Lancement du script Python
+echo "Lancement de l'expérience A..."
 python src/main_contrastive.py --config src/configs/exp_A_baseline.yaml
 
-echo "5. Fin du job."
+echo "--- Fin du Job ---"
