@@ -40,7 +40,7 @@ echo "-----------------------"
 # Préparation de l'environnement
 echo "Chargement des modules..."
 module purge
-module load python cuda
+module load python 
 
 echo "Activation de l'environnement virtuel..."
 source /sps/liris/eebou/htr_env/bin/activate
