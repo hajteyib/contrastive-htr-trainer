@@ -6,7 +6,6 @@ import random
 from scipy.ndimage import gaussian_filter, map_coordinates
 from skimage import transform as skimage_transform
 import torchvision.transforms as transforms
-from PIL import Image 
 
 
 class IntelligentBackgroundNormalizer:
@@ -45,126 +44,79 @@ class IntelligentBackgroundNormalizer:
 
 
 class ElasticDistortion:
-    """Applique une déformation élastique légère pour simuler les variations naturelles."""
-    def __init__(self, alpha: float, sigma: float):
+    """Enhanced elastic distortion for natural handwriting variation."""
+    
+    def __init__(self, alpha: float = 15, sigma: float = 4, probability: float = 0.4):
         self.alpha = alpha
         self.sigma = sigma
+        self.probability = probability
     
     def __call__(self, image: np.ndarray) -> np.ndarray:
-        height, width = image.shape
-        dx = gaussian_filter((np.random.rand(height, width) * 2 - 1), self.sigma) * self.alpha
-        dy = gaussian_filter((np.random.rand(height, width) * 2 - 1), self.sigma) * self.alpha
+        """Apply elastic distortion with probability."""
+        if random.random() > self.probability:
+            return image
+            
+        height, width = image.shape[:2]
+        
+        # Generate smooth random displacement fields
+        dx = gaussian_filter(
+            (np.random.rand(height, width) * 2 - 1), 
+            self.sigma, mode="constant", cval=0
+        ) * self.alpha
+        
+        dy = gaussian_filter(
+            (np.random.rand(height, width) * 2 - 1), 
+            self.sigma, mode="constant", cval=0
+        ) * self.alpha
+        
+        # Create coordinate grids
         x, y = np.meshgrid(np.arange(width), np.arange(height))
         indices = np.reshape(y + dy, (-1, 1)), np.reshape(x + dx, (-1, 1))
-        return map_coordinates(image, indices, order=1, mode='reflect').reshape((height, width))
+        
+        # Apply distortion
+        distorted = map_coordinates(
+            image, indices, order=1, mode='reflect'
+        ).reshape((height, width))
+        
+        return distorted
 
 
-class InkVariation:
-    """Simule des variations réalistes d'épaisseur et d'intensité de l'encre."""
-    def __init__(self, intensity_range: Tuple[float, float], thickness_range: int):
+class InkVariationSimulator:
+    """Simulate realistic ink thickness and intensity variations."""
+    
+    def __init__(self, intensity_range: Tuple[float, float] = (0.8, 1.2),
+                 thickness_prob: float = 0.3, probability: float = 0.5):
         self.intensity_range = intensity_range
-        self.thickness_range = thickness_range
-
+        self.thickness_prob = thickness_prob
+        self.probability = probability
+    
     def __call__(self, image: np.ndarray) -> np.ndarray:
+        """Apply ink variations."""
+        if random.random() > self.probability:
+            return image
+            
         result = image.copy()
+        
+        # Intensity variation (simulate ink density changes)
         intensity_factor = random.uniform(*self.intensity_range)
-        ink_mask = image < 0.8
+        
+        # Only affect darker regions (ink regions)
+        ink_mask = image < 0.7  # Assume darker regions are ink
         result[ink_mask] = np.clip(result[ink_mask] * intensity_factor, 0, 1)
         
-        if random.random() < 0.5 and self.thickness_range > 0:
-            kernel_size = random.randint(2, self.thickness_range)
+        # Thickness variation via morphological operations
+        if random.random() < self.thickness_prob:
+            kernel_size = random.choice([2, 3])
             kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
-            op = cv2.dilate if random.random() < 0.5 else cv2.erode
-            result = op(result, kernel, iterations=1)
+            
+            if random.random() < 0.5:
+                # Thicker strokes (dilation)
+                result = cv2.dilate(result, kernel, iterations=1)
+            else:
+                # Thinner strokes (erosion) 
+                result = cv2.erode(result, kernel, iterations=1)
         
         return np.clip(result, 0, 1)
-
-class PaperNoise:
-    """Simule le bruit et la texture du papier."""
-    def __init__(self, noise_intensity: float):
-        self.noise_intensity = noise_intensity
-
-    def __call__(self, image: np.ndarray) -> np.ndarray:
-        noise = np.random.normal(0, self.noise_intensity, image.shape)
-        return np.clip(image + noise, 0, 1)
-        
-class HorizontalCrop:
-    """Coupe l'image horizontalement et la redimensionne à sa taille originale."""
-    def __init__(self, min_width_ratio: float):
-        self.min_width_ratio = min_width_ratio
-
-    def __call__(self, image: np.ndarray) -> np.ndarray:
-        height, width = image.shape
-        crop_width = random.randint(int(width * self.min_width_ratio), width)
-        start_x = random.randint(0, width - crop_width)
-        cropped = image[:, start_x : start_x + crop_width]
-        return cv2.resize(cropped, (width, height), interpolation=cv2.INTER_AREA)
-
-
-class HTRContrastiveTransform:
-    """
-    Un pipeline de transformation contrastive spécialisé pour le HTR,
-    utilisant des augmentations réalistes et contrôlées.
-    """
-    def __init__(self, height: int):
-        self.height = height
-
-        # --- Définition de nos augmentations "réalistes" ---
-        
-        # Déformations géométriques légères
-        self.geometric_transforms = transforms.RandomApply([
-            transforms.RandomAffine(degrees=2, shear=2)
-        ], p=0.7)
-        
-        self.elastic = ElasticDistortion(alpha=30, sigma=5)
-
-        # Variations photométriques subtiles
-        self.photometric_transforms = transforms.RandomApply([
-            transforms.ColorJitter(brightness=0.1, contrast=0.1)
-        ], p=0.7)
-        
-        self.ink_variation = InkVariation(intensity_range=(0.7, 1.3), thickness_range=2)
-        self.paper_noise = PaperNoise(noise_intensity=0.02)
-        
-        # Augmentation structurelle (crop horizontal)
-        self.horizontal_crop = HorizontalCrop(min_width_ratio=0.7)
-
-    def __call__(self, image: Image.Image) -> torch.Tensor:
-        # 1. Prétraitement initial : redimensionner et convertir en numpy
-        w, h = image.size
-        new_width = int(w * self.height / h)
-        image_resized = image.resize((new_width, self.height), Image.LANCZOS)
-        image_np = (255 - np.array(image_resized)).astype(np.float32) / 255.0
-
-        # 2. Appliquer une séquence d'augmentations aléatoires
-        # C'est ici que la magie opère : chaque image subit une combinaison unique
-        # de transformations, garantissant que les deux vues sont différentes.
-        
-        # 2.1 Augmentations structurelles (appliquées avec une certaine probabilité)
-        if random.random() < 0.3:
-            image_np = self.horizontal_crop(image_np)
-
-        # 2.2 Augmentations photométriques
-        image_np = self.ink_variation(image_np)
-        image_np = self.paper_noise(image_np)
-
-        # 2.3 Déformations géométriques
-        if random.random() < 0.5:
-            image_np = self.elastic(image_np)
-
-        # 3. Conversion en tenseur et application des dernières transformations
-        # On passe par PIL pour utiliser les transformations de torchvision
-        image_pil = Image.fromarray((image_np * 255).astype(np.uint8))
-        
-        final_tensor = transforms.Compose([
-            self.geometric_transforms,
-            self.photometric_transforms,
-            transforms.ToTensor(), # Normalise à [0, 1] et met [C, H, W]
-            transforms.Normalize(mean=[0.5], std=[0.5]) # Normalise à [-1, 1]
-        ])(image_pil)
-        
-        return final_tensor
-
 
 
 class PaperAgeingSimulator:

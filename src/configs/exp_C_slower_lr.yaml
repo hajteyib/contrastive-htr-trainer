@@ -1,29 +1,57 @@
-# Expérience C : Hypothèse "Apprentissage Doux"
+# src/configs/exp_C_slower_lr.yaml
+# Expérience C : Stratégie HTR-Spécifique avec Apprentissage Doux
+
 seed: 42
+
 experiment:
-  name: "exp_C_slower_lr"
+  name: "exp_C_HTR_specific_slow_lr"
   output_dir: "/sps/liris/eebou/htr_outputs"
   log_dir: "/sps/liris/eebou/htr_logs"
+
 model:
-  global_dim: 512
+  # Tête de projection plus petite pour une meilleure régularisation.
+  global_dim: 256
+
 data:
   data_list_file: "/sps/liris/eebou/datasets/htr_valid_paths.txt"
   target_height: 128
+  # Batch size ambitieux grâce aux H100.
   batch_size: 256
   num_workers: 16
-augmentation:
-  strength: 0.7
+
 loss:
-  global_temp: 0.2
+  # Température plus basse car les augmentations sont moins extrêmes.
+  global_temp: 0.07
   queue_size: 16384
+
 training:
-  num_epochs: 50
-  learning_rate: 1e-4 # Plus faible
-  weight_decay: 5e-4
+  num_epochs: 100 # Laisser l'early stopping décider de la fin.
+  # Learning rate plus faible pour une convergence stable.
+  learning_rate: 1e-4
+  weight_decay: 1e-3 # Régularisation toujours forte.
   momentum: 0.996
-  warmup_epochs: 10 # Plus long
+  warmup_epochs: 10 # Warmup plus long.
+  
+  # On active toutes les optimisations de vitesse.
+  use_amp: true
+  
   validate_every_n_epochs: 1
-  early_stopping: { enabled: true, patience: 10, monitor: "val_contrastive_acc", mode: "max" }
-optimizer: { type: "adamw" }
-scheduler: { type: "cosine", min_lr: 1e-6 }
-advanced: { use_amp: true, compile_model: true }
+  
+  early_stopping:
+    enabled: true
+    patience: 15 # Patience augmentée.
+    monitor: "val_contrastive_acc"
+    mode: "max"
+
+optimizer:
+  type: "adamw"
+  betas: [0.9, 0.999]
+
+scheduler:
+  type: "cosine"
+  min_lr: 1e-6
+
+advanced:
+  # On tente de réactiver torch.compile. Si ça échoue, on le mettra à false.
+  compile_model: true
+  channels_last_memory_format: true

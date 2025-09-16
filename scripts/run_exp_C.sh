@@ -13,9 +13,11 @@
 #SBATCH --mail-type=ALL
 #SBATCH --licenses=sps
 
-# --- SCRIPT D'EXÉCUTION DIRECT ---
+# --- SCRIPT D'EXÉCUTION ---
+set -euxo pipefail
 
 mkdir -p slurm_logs
+
 echo "--- Job Information ---"
 echo "Job ID: $SLURM_JOB_ID | Node: $SLURMD_NODENAME"
 echo "-----------------------"
@@ -27,10 +29,10 @@ module load python
 echo "Activation de l'environnement virtuel..."
 source /sps/liris/eebou/htr_env/bin/activate
 
-echo "Lancement de l'Expérience C (Apprentissage Doux)..."
+echo "Lancement de l'Expérience C (Apprentissage Doux HTR-Spécifique)..."
 echo "--- DEBUT DE LA SORTIE PYTHON ---"
 
-# On utilise le chemin absolu et le bon fichier de configuration
+# Utilisation du chemin absolu et du bon fichier de configuration
 /sps/liris/eebou/htr_env/bin/python src/main_contrastive.py --config src/configs/exp_C_slower_lr.yaml
 
 echo "--- FIN DE LA SORTIE PYTHON ---"
