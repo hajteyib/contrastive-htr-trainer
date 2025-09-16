@@ -97,7 +97,9 @@ def create_contrastive_dataloaders(data_list_file: str, batch_size: int, num_wor
     
     # Options pour les DataLoaders sur le cluster
     persistent_workers = True if num_workers > 0 else False
-    
+    if smoke_test:
+        batch_size = min(batch_size, 16) # Utiliser un petit batch size pour le test
+        print(f"--- SMOKE TEST: Batch size réduit à {batch_size} ---") 
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,

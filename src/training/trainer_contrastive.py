@@ -138,8 +138,14 @@ class ContrastiveTrainer:
             
             total_loss += loss.item()
             pbar.set_postfix(loss=f"{loss.item():.4f}")
+
+        num_batches = len(self.train_dataloader)
+        if num_batches == 0:
+            self.logger.warning("Train Dataloader was empty, returning zero loss for the epoch.")
+            return {'train_loss': 0.0}
+            
+        return {'train_loss': total_loss / num_batches}
         
-        return {'train_loss': total_loss / len(self.train_dataloader)}
 
     def validate_epoch(self) -> Dict[str, float]:
         """Évalue le modèle sur le set de validation pour la perte ET la précision."""
