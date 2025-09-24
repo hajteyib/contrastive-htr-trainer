@@ -34,7 +34,9 @@ echo "--- DEBUT DE LA SORTIE PYTHON ---"
 # On utilise la syntaxe attendue par Hydra :
 # --config-path : Le dossier où se trouvent TOUS les fichiers de config.
 # --config-name : Le NOM du fichier de config à utiliser (sans le .yaml).
-python src/main_contrastive.py --config-path src/configs --config-name exp_A_baseline
+python src/main_contrastive.py --config-name exp_A_baseline
+
+
 
 echo "--- FIN DE LA SORTIE PYTHON ---"
 echo "Fin du job."
