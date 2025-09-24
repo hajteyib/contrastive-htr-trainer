@@ -27,8 +27,14 @@ module purge
 module load python
 source /sps/liris/eebou/htr_env/bin/activate
 
-# 2. Lancement du script Python
-echo "Lancement de l'expérience A..."
-python src/main_contrastive.py --config src/configs/exp_A_baseline.yaml
+echo "Lancement de l'Expérience A..."
+echo "--- DEBUT DE LA SORTIE PYTHON ---"
 
-echo "--- Fin du Job ---"
+### CORRECTION FINALE ###
+# On utilise la syntaxe attendue par Hydra :
+# --config-path : Le dossier où se trouvent TOUS les fichiers de config.
+# --config-name : Le NOM du fichier de config à utiliser (sans le .yaml).
+python src/main_contrastive.py --config-path src/configs --config-name exp_A_baseline
+
+echo "--- FIN DE LA SORTIE PYTHON ---"
+echo "Fin du job."
