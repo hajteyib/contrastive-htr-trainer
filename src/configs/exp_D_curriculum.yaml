@@ -1,0 +1,61 @@
+# --- Expérience D : Curriculum Progressif ---
+
+experiment:
+  name: "exp_D_curriculum"
+  output_dir: "/sps/liris/eebou/htr_outputs"
+  log_dir: "/sps/liris/eebou/htr_logs"
+
+model:
+  attention_type: 'se' # SE-block, moins coûteux que CBAM
+  projection_head:
+    layers:
+      - { dim: 2048, dropout: 0.0 }
+      - { dim: 1024, dropout: 0.1 }
+      - { dim: 512, dropout: 0.2 }
+      - { dim: 128 }
+
+data:
+  data_list_file: "/sps/liris/eebou/datasets/htr_valid_paths.txt"
+  target_height: 128
+  # Le batch size sera défini par phase
+  num_workers: 16
+
+augmentation: # Les configs seront utilisées par les différentes phases
+  view_types: ['global', 'global']
+  configs:
+    none: { crop_scale: [1.0, 1.0], rotation: 0, shear: 0, elastic_alpha: 0, brightness: 0, ink_variation: false, paper_noise: false, horizontal_crop: false }
+    light: { crop_scale: [0.8, 1.0], rotation: 2, shear: 2, elastic_alpha: 20, brightness: 0.1, ink_variation: true, paper_noise: true, horizontal_crop: false }
+    full: { crop_scale: [0.6, 1.0], rotation: 3, shear: 5, elastic_alpha: 30, brightness: 0.2, ink_variation: true, paper_noise: true, horizontal_crop: true }
+
+loss: # La température sera définie par phase
+  queue_size: 32768
+  lambda_contrast: 1.0
+
+training:
+  phases:
+    - name: "Phase 1: Apprentissage des bases"
+      epochs: 30
+      learning_rate: 2e-4
+      momentum: 0.99
+      batch_size: 256
+      augmentation_strength: 'none' # Le dataset doit pouvoir gérer ça
+      temperature: 0.15
+    - name: "Phase 2: Raffinement"
+      epochs: 40
+      learning_rate: 1e-4
+      momentum: 0.996
+      batch_size: 384
+      augmentation_strength: 'light'
+      temperature: 0.1
+    - name: "Phase 3: Discrimination fine"
+      epochs: 30
+      learning_rate: 5e-5
+      momentum: 0.999
+      batch_size: 512
+      augmentation_strength: 'full'
+      temperature: 0.05
+  
+  early_stopping: { enabled: true, patience: 20, monitor: "val_contrastive_acc" }
+
+optimizer: { type: "adamw", weight_decay: 5e-5 }
+advanced: { use_amp: true, compile_model: true }

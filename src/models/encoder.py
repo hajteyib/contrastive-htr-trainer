@@ -1,180 +1,134 @@
-# src/models/encoder.py
+# Fichier : src/models/encoder.py (VERSION FINALE FLEXIBLE)
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision.models import resnet34, ResNet34_Weights
-from typing import Tuple, Dict
+from typing import Dict
 
-class SpatialAttention(nn.Module):
-    """Module d'attention spatiale pour se concentrer sur les régions d'écriture."""
-    def __init__(self, in_channels: int):
+# --- Modules d'Attention ---
+class SEBlock(nn.Module):
+    """Squeeze-and-Excitation Block."""
+    def __init__(self, channel, reduction=16):
         super().__init__()
-        hidden_channels = max(16, in_channels // 16)
-        self.conv1 = nn.Conv2d(in_channels, hidden_channels, 1)
-        self.conv2 = nn.Conv2d(hidden_channels, in_channels, 1)
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.fc = nn.Sequential(
+            nn.Linear(channel, channel // reduction, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(channel // reduction, channel, bias=False),
+            nn.Sigmoid()
+        )
+    def forward(self, x):
+        b, c, _, _ = x.size()
+        y = self.avg_pool(x).view(b, c)
+        y = self.fc(y).view(b, c, 1, 1)
+        return x * y.expand_as(x)
+
+class CBAM(nn.Module):
+    """Convolutional Block Attention Module."""
+    def __init__(self, channel, reduction=16):
+        super().__init__()
+        # Channel Attention
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.max_pool = nn.AdaptiveMaxPool2d(1)
+        self.fc = nn.Sequential(
+            nn.Conv2d(channel, channel // reduction, 1, bias=False),
+            nn.ReLU(),
+            nn.Conv2d(channel // reduction, channel, 1, bias=False)
+        )
         self.sigmoid = nn.Sigmoid()
-        
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        identity = x
-        attention = F.relu(self.conv1(x))
-        attention = self.sigmoid(self.conv2(attention))
-        return identity * attention
+        # Spatial Attention
+        self.conv_spatial = nn.Conv2d(2, 1, 7, padding=3, bias=False)
 
-class DilatedFPN(nn.Module):
-    """Feature Pyramid Network amélioré avec des convolutions dilatées pour le HTR."""
-    def __init__(self, in_channels_list: list, out_channels: int = 256):
-        super().__init__()
-        self.lateral_convs = nn.ModuleList()
-        self.fpn_convs = nn.ModuleList()
-        
-        for in_channels in in_channels_list:
-            self.lateral_convs.append(nn.Conv2d(in_channels, out_channels, 1))
-            self.fpn_convs.append(nn.Conv2d(out_channels, out_channels, 3, padding=2, dilation=2))
-    
-    def forward(self, features: list) -> list:
-        laterals = [conv(feat) for conv, feat in zip(self.lateral_convs, features)]
-        
-        for i in range(len(laterals) - 1, 0, -1):
-            upsampled = F.interpolate(laterals[i], size=laterals[i-1].shape[-2:], mode="bilinear", align_corners=False)
-            laterals[i-1] = laterals[i-1] + upsampled
-        
-        return [conv(lateral) for conv, lateral in zip(self.fpn_convs, laterals)]
+    def forward(self, x):
+        # Channel Attention
+        avg_out = self.fc(self.avg_pool(x))
+        max_out = self.fc(self.max_pool(x))
+        channel_att = self.sigmoid(avg_out + max_out)
+        x = x * channel_att
+        # Spatial Attention
+        avg_out = torch.mean(x, dim=1, keepdim=True)
+        max_out, _ = torch.max(x, dim=1, keepdim=True)
+        spatial_att = self.sigmoid(self.conv_spatial(torch.cat([avg_out, max_out], dim=1)))
+        x = x * spatial_att
+        return x
 
-class SimplePatchExtractor(nn.Module):
+# --- Encodeur Principal ---
+class ConfigurableEncoder(nn.Module):
     """
-    Extraction de patchs simple sur une grille fixe, adaptée aux images de taille fixe.
+    Architecture ResNet34 modifiée, configurable pour les expériences.
     """
-    def __init__(self, patch_dim: int = 128, fpn_channels: int = 256, grid_size: int = 7):
+    def __init__(self, config: Dict):
         super().__init__()
-        self.patch_dim = patch_dim
-        self.grid_size = grid_size
-        self.patch_processor = nn.Sequential(
-            nn.Conv2d(fpn_channels, patch_dim, 1),
-            nn.ReLU(inplace=True),
-        )
+        self.config = config
         
-        ### CORRECTION FINALE ###
-        # Au lieu d'une projection linéaire fixe, nous utilisons un pooling adaptatif
-        # pour forcer chaque patch à une taille fixe (1x1), puis nous l'aplatissons.
-        # Cela garantit que la sortie aura toujours la bonne dimension (patch_dim).
-        self.projection = nn.AdaptiveAvgPool2d((1, 1)) # Adapte la taille
-        
-    def forward(self, features: torch.Tensor) -> Dict[str, torch.Tensor]:
-        B, C, H, W = features.shape
-        
-        # 1. Première projection convolutive
-        processed_features = self.patch_processor(features) # Taille: [B, patch_dim, H', W']
-        
-        # 2. Découpage en une grille de patchs
-        # unfold crée des "vues" sans copier la mémoire, c'est très efficace.
-        patch_size_h, patch_size_w = H // self.grid_size, W // self.grid_size
-        patches = processed_features.unfold(2, patch_size_h, patch_size_h).unfold(3, patch_size_w, patch_size_w)
-        # patches a maintenant la taille [B, patch_dim, grid_size, grid_size, patch_size_h, patch_size_w]
-
-        # 3. On fusionne les dimensions du batch et de la grille
-        patches = patches.contiguous().view(B * self.grid_size**2, self.patch_dim, patch_size_h, patch_size_w)
-        
-        # 4. On applique le pooling adaptatif sur chaque patch individuellement
-        # Chaque patch [patch_dim, patch_size_h, patch_size_w] devient [patch_dim, 1, 1]
-        pooled_patches = self.projection(patches)
-        
-        # 5. On retire les dimensions inutiles et on reforme le batch
-        final_patches = pooled_patches.view(B, self.grid_size**2, self.patch_dim)
-        
-        return {'features': final_patches, 'num_patches': self.grid_size**2}
-
-
-class OptimizedHTREncoder(nn.Module):
-    """Encodeur HTR optimisé pour la stratégie SimCLR avec des images de taille fixe."""
-    def __init__(self, global_dim: int = 512, patch_dim: int = 128, fpn_channels: int = 256):
-        super().__init__()
-        self.global_dim = global_dim
-        self.patch_dim = patch_dim
-        
-        self.backbone = self._build_enhanced_backbone()
-        
-        self.attention_modules = nn.ModuleList([
-            SpatialAttention(64),
-            SpatialAttention(64),
-            SpatialAttention(128),
-            SpatialAttention(256),
-        ])
-        
-        self.fpn = DilatedFPN([64, 64, 128, 256], out_channels=fpn_channels)
-        
-        # Tête de projection robuste pour la représentation globale
-        self.global_head = nn.Sequential(
-            nn.AdaptiveAvgPool2d(1),
-            nn.Flatten(),
-            nn.Linear(fpn_channels, fpn_channels),
-            nn.BatchNorm1d(fpn_channels),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.2),
-            nn.Linear(fpn_channels, global_dim)
-        )
-        
-        # Remplacement de l'extracteur adaptatif par un extracteur simple à grille fixe
-        self.patch_extractor = SimplePatchExtractor(patch_dim, fpn_channels, grid_size=7)
-        
-        self._init_weights()
-    
-    def _build_enhanced_backbone(self):
+        # --- Backbone ResNet34 ---
         backbone = resnet34(weights=ResNet34_Weights.IMAGENET1K_V1)
-        # Stride réduit pour mieux gérer les images de taille fixe (ex: 400x400)
-        backbone.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=1, padding=3, bias=False)
-        for block in backbone.layer3:
-            if hasattr(block, 'conv2'):
-                block.conv2.dilation = (2, 2); block.conv2.padding = (2, 2)
-        backbone.fc = nn.Identity(); backbone.avgpool = nn.Identity()
-        return backbone
-    
-    def _init_weights(self):
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-                if m.bias is not None: nn.init.constant_(m.bias, 0)
-            elif isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
-                if m.bias is not None: nn.init.constant_(m.bias, 0)
-            elif isinstance(m, (nn.BatchNorm2d, nn.BatchNorm1d)):
-                nn.init.constant_(m.weight, 1); nn.init.constant_(m.bias, 0)
+        self.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        self.bn1 = backbone.bn1
+        self.relu = backbone.relu
+        self.layer1 = backbone.layer1
+        self.layer2 = backbone.layer2
+        self.layer3 = backbone.layer3
+        self.layer4 = backbone.layer4
+        
+        # --- Pooling OCR-Spécifique ---
+        self.pool2 = nn.MaxPool2d(kernel_size=(2, 1), stride=(2, 1))
+        self.pool3 = nn.MaxPool2d(kernel_size=(2, 1), stride=(2, 1))
 
-    def _extract_backbone_features(self, x: torch.Tensor) -> list:
-        """Extrait les features multi-échelles, en appliquant l'attention au bon endroit."""
-        features = []
+        # --- Module d'Attention (Configurable) ---
+        attention_type = self.config.get('attention_type', 'none').lower()
+        if attention_type == 'cbam':
+            self.attention = CBAM(512)
+        elif attention_type == 'se':
+            self.attention = SEBlock(512)
+        else:
+            self.attention = nn.Identity()
+            
+        # --- Tête de Projection Profonde (Configurable) ---
+        head_config = self.config['projection_head']
+        layers = []
+        input_dim = 512 # Sortie de Layer4 et Attention
         
-        # Étape 0
-        l0_out = self.backbone.relu(self.backbone.bn1(self.backbone.conv1(x)))
-        features.append(l0_out)
+        for i, layer_conf in enumerate(head_config['layers']):
+            output_dim = layer_conf['dim']
+            layers.append(nn.Linear(input_dim, output_dim))
+            # Pas de BN/Activation sur la toute dernière couche
+            if i < len(head_config['layers']) - 1:
+                layers.append(nn.BatchNorm1d(output_dim))
+                layers.append(nn.ReLU(inplace=True))
+                if layer_conf.get('dropout', 0) > 0:
+                    layers.append(nn.Dropout(p=layer_conf['dropout']))
+            input_dim = output_dim
+            
+        self.projection_head = nn.Sequential(*layers)
         
-        # Étape 1
-        p0 = self.backbone.maxpool(self.attention_modules[0](l0_out))
-        l1_out = self.backbone.layer1(p0)
-        features.append(l1_out)
-        
-        # Étape 2
-        l2_out = self.backbone.layer2(self.attention_modules[1](l1_out))
-        features.append(l2_out)
-        
-        # Étape 3
-        l3_out = self.backbone.layer3(self.attention_modules[2](l2_out))
-        features.append(l3_out)
-        
-        return features
-    
+        # --- Têtes pour les Loss Auxiliaires ---
+        self.width_predictor = nn.Linear(512, 1) if self.config['loss'].get('lambda_width', 0) > 0 else nn.Identity()
+        self.density_predictor = nn.Linear(512, 1) if self.config['loss'].get('lambda_density', 0) > 0 else nn.Identity()
+
     def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
-        backbone_features = self._extract_backbone_features(x)
-        fpn_features = self.fpn(backbone_features)
+        # x est une vue [B, 1, H, W]
+        x = self.relu(self.bn1(self.conv1(x)))
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.pool2(x)
+        x = self.layer3(x)
+        x = self.pool3(x)
+        x = self.layer4(x)
+        x = self.attention(x)
         
-        # La représentation globale est extraite des features les plus sémantiques
-        global_features = self.global_head(fpn_features[-1])
+        # Pooling global pour les têtes
+        pooled = F.adaptive_avg_pool2d(x, 1).flatten(1)
         
-        # La représentation locale (patchs) est extraite de features de niveau intermédiaire
-        patch_info = self.patch_extractor(fpn_features[1])
+        # Calcul des sorties
+        projection = self.projection_head(pooled)
+        predicted_width = self.width_predictor(pooled)
+        predicted_density = self.density_predictor(pooled)
         
         return {
-            'global': global_features,
-            'patches': patch_info['features'],
-            'patch_info': {'num_patches': patch_info['num_patches']}
-                    }
+            'projection': projection,       # Pour la loss contrastive
+            'features': pooled,             # Pour les loss auxiliaires
+            'predicted_width': predicted_width,
+            'predicted_density': predicted_density
+        }

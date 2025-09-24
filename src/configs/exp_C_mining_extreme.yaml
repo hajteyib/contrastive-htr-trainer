@@ -1,49 +1,40 @@
-# --- Expérience A : Baseline Solide ---
+# --- Expérience C : Mining Extrême ---
 
 experiment:
-  name: "exp_A_baseline"
+  name: "exp_C_mining_extreme"
   output_dir: "/sps/liris/eebou/htr_outputs"
   log_dir: "/sps/liris/eebou/htr_logs"
 
 model:
-  attention_type: 'cbam'
+  attention_type: 'none' # Pas d'attention pour économiser mémoire/vitesse
   projection_head:
-    layers:
+    layers: # Tête simplifiée
       - { dim: 2048, dropout: 0.0 }
       - { dim: 1024, dropout: 0.1 }
-      - { dim: 512, dropout: 0.2 }
-      - { dim: 256, dropout: 0.3 }
       - { dim: 128 }
 
 data:
   data_list_file: "/sps/liris/eebou/datasets/htr_valid_paths.txt"
   target_height: 128
-  batch_size: 256 # Plus petit car 2 vues seulement
+  batch_size: 512 # Batch size très grand
   num_workers: 16
 
 augmentation:
-  view_types: ['global', 'global'] # 2 vues globales
+  view_types: ['light', 'light'] # 2 vues, augmentations très légères
   configs:
-    global:
-      crop_scale: [0.8, 1.0]
-      rotation: 3
-      shear: 5
-      elastic_alpha: 30
-      brightness: 0.2
-      ink_variation: true
-      paper_noise: true
-      horizontal_crop: true
+    light: { crop_scale: [0.9, 1.0], rotation: 1, shear: 1, elastic_alpha: 10, brightness: 0.05, ink_variation: false, paper_noise: true, horizontal_crop: false }
 
 loss:
-  temperature: 0.07
-  queue_size: 32768
+  temperature: 0.05 # Plus bas car les vues sont similaires
+  queue_size: 65536
   lambda_contrast: 1.0
+  # hard_negative_mining très agressif à implémenter
 
 training:
   phases:
     - name: "Main Training"
       epochs: 100
-      learning_rate: 5e-4
+      learning_rate: 1e-4
       momentum: 0.996
   early_stopping: { enabled: true, patience: 20, monitor: "val_contrastive_acc" }
 

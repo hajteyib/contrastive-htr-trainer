@@ -1,0 +1,46 @@
+# --- Expérience B : Multi-Vue et Hard Mining ---
+
+experiment:
+  name: "exp_B_multi_view"
+  output_dir: "/sps/liris/eebou/htr_outputs"
+  log_dir: "/sps/liris/eebou/htr_logs"
+
+model: # Identique à A
+  attention_type: 'cbam'
+  projection_head:
+    layers:
+      - { dim: 2048, dropout: 0.0 }
+      - { dim: 1024, dropout: 0.1 }
+      - { dim: 512, dropout: 0.2 }
+      - { dim: 256, dropout: 0.3 }
+      - { dim: 128 }
+
+data:
+  data_list_file: "/sps/liris/eebou/datasets/htr_valid_paths.txt"
+  target_height: 128
+  batch_size: 128 # Plus petit car 6 vues = plus de mémoire
+  num_workers: 16
+
+augmentation:
+  view_types: ['global', 'global', 'medium', 'medium', 'local', 'local'] # 6 vues
+  configs:
+    global: { crop_scale: [0.85, 1.0], rotation: 2, shear: 3, elastic_alpha: 20, brightness: 0.1, ink_variation: true, paper_noise: true, horizontal_crop: false }
+    medium: { crop_scale: [0.6, 0.85], rotation: 3, shear: 5, elastic_alpha: 30, brightness: 0.15, ink_variation: true, paper_noise: true, horizontal_crop: true }
+    local: { crop_scale: [0.4, 0.6], rotation: 5, shear: 5, elastic_alpha: 40, brightness: 0.2, ink_variation: true, paper_noise: true, horizontal_crop: true }
+
+loss:
+  temperature: 0.1 # Plus haut car la tâche est plus complexe
+  queue_size: 65536
+  lambda_contrast: 1.0
+  # hard_negative_mining à implémenter dans la loss
+
+training:
+  phases:
+    - name: "Main Training"
+      epochs: 100
+      learning_rate: 5e-4
+      momentum: 0.999
+  early_stopping: { enabled: true, patience: 20, monitor: "val_contrastive_acc" }
+
+optimizer: { type: "adamw", weight_decay: 5e-5 }
+advanced: { use_amp: true, compile_model: true }
