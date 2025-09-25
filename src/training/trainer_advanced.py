@@ -162,32 +162,54 @@ class AdvancedTrainer:
         return {'val_contrastive_acc': acc}
 
     def train(self):
-        training_phases = self.config['training']['phases']
+    """
+    Boucle d'entraînement principale qui gère les phases et l'early stopping.
+    """
+    training_phases = self.config['training']['phases']
+    
+    self.logger.info(f"🚀 Démarrage de l'entraînement pour {len(training_phases)} phase(s).")
+    
+    for phase_idx, phase_config in enumerate(training_phases):
+        self._setup_phase(phase_config)
         
-        for phase_idx, phase_config in enumerate(training_phases):
-            self._setup_phase(phase_config)
+        for _ in range(phase_config['epochs']):
+            # --- Entraînement et Validation ---
+            train_metrics = self.train_epoch()
+            val_metrics = self.validate_epoch()
             
-            for _ in range(phase_config['epochs']):
-                train_metrics = self.train_epoch()
-                val_metrics = self.validate_epoch()
+            # --- Logique d'Early Stopping et Sauvegarde ---
+            current_metric = val_metrics.get(self.es_monitor_metric)
+            
+            # Vérifier si la métrique est valide avant de comparer
+            if current_metric is not None and not np.isnan(current_metric):
                 
-                current_metric = val_metrics.get(self.es_monitor_metric)
-                if current_metric is not None and current_metric > self.es_best_metric:
+                # On vérifie si le score s'est amélioré
+                improved = (self.es_mode == 'max' and current_metric > self.es_best_metric) or \
+                           (self.es_mode == 'min' and current_metric < self.es_best_metric)
+                           
+                if improved:
                     self.es_best_metric = current_metric
                     self.es_counter = 0
-                    self.logger.info(f"✅ Nouveau meilleur score ({self.es_monitor_metric}): {current_metric:.2f}%.")
-                    # Sauvegarder le meilleur modèle
-                    torch.save(self.model.state_dict(), self.checkpoint_dir / "best_model.pth")
+                    self.logger.info(f"✅ Nouveau meilleur score ({self.es_monitor_metric}): {current_metric:.2f}%. Sauvegarde du modèle.")
+                    # On utilise notre fonction de sauvegarde
+                    self.save_checkpoint(is_best=True)
                 else:
                     self.es_counter += 1
-                
-                log_str = f"Epoch {self.current_epoch} (Phase {phase_idx+1}) | Train Loss: {train_metrics['total_loss']:.4f} | Val Acc: {current_metric:.2f}%"
-                self.logger.info(log_str)
-                
-                if self.es_enabled and self.es_counter >= self.es_patience:
-                    self.logger.info(f"🛑 Early stopping déclenché.")
-                    return # Terminer l'entraînement
-                
-                self.current_epoch += 1
+                    self.logger.info(f"⚠️ Validation metric did not improve for {self.es_counter} epoch(s). Patience: {self.es_patience}")
 
-        self.logger.info("🎉 Entraînement terminé.")
+            # --- Logging de Fin d'Époque ---
+            train_loss = train_metrics.get('total_loss', float('nan'))
+            val_acc = val_metrics.get('val_contrastive_acc', float('nan'))
+            log_str = f"Epoch {self.current_epoch} (Phase {phase_idx+1}) | Train Loss: {train_loss:.4f} | Val Acc: {val_acc:.2f}%"
+            self.logger.info(log_str)
+
+            # --- Vérification de l'Arrêt ---
+            if self.es_enabled and self.es_counter >= self.es_patience:
+                self.logger.info(f"🛑 Early stopping déclenché après {self.es_patience} époques sans amélioration.")
+                self.logger.info(f"🏆 Meilleur score obtenu ({self.es_monitor_metric}): {self.es_best_metric:.2f}%")
+                return # Terminer proprement l'entraînement
+
+            self.current_epoch += 1
+
+    self.logger.info("🎉 Entraînement terminé (nombre maximum d'époques atteint).")
+    self.logger.info(f"🏆 Meilleur score obtenu ({self.es_monitor_metric}): {self.es_best_metric:.2f}%")

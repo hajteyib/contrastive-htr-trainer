@@ -100,9 +100,10 @@ class MultiViewDataset(Dataset):
             image = Image.open(image_path).convert("L")
             views = [gen(image) for gen in self.view_generators]
             
+            image_np_for_stats = np.array(image)
             width_ratio = torch.tensor([image.width / self.config['data']['target_height']], dtype=torch.float32)
-            density = torch.tensor([1 - (np.array(image).astype(np.float32) / 255.0).mean()], dtype=torch.float32)
-            
+            density = torch.tensor([1 - (image_np_for_stats.astype(np.float32) / 255.0).mean()], dtype=torch.float32)
+
             return tuple(views) + (width_ratio, density)
         except Exception as e:
             # CORRECTION : Ne pas faire d'appel récursif. Retourner None.

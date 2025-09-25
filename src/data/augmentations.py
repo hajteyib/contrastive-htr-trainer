@@ -129,38 +129,35 @@ class HTRContrastiveTransform:
         # Augmentation structurelle (crop horizontal)
         self.horizontal_crop = HorizontalCrop(min_width_ratio=0.7)
 
+    # Dans src/data/augmentations.py, dans la classe HTRContrastiveTransform
+
     def __call__(self, image: Image.Image) -> torch.Tensor:
-        # 1. Prétraitement initial : redimensionner et convertir en numpy
+        # 1. Prétraitement initial : redimensionner
         w, h = image.size
         new_width = int(w * self.height / h)
         image_resized = image.resize((new_width, self.height), Image.LANCZOS)
-        image_np = (255 - np.array(image_resized)).astype(np.float32) / 255.0
-
-        # 2. Appliquer une séquence d'augmentations aléatoires
-        # C'est ici que la magie opère : chaque image subit une combinaison unique
-        # de transformations, garantissant que les deux vues sont différentes.
         
-        # 2.1 Augmentations structurelles (appliquées avec une certaine probabilité)
+        ### CORRECTION ###
+        # On convertit en numpy AVANT de faire des opérations mathématiques
+        image_np = np.array(image_resized)
+        image_np = (255 - image_np).astype(np.float32) / 255.0
+
+        # 2. Appliquer une séquence d'augmentations aléatoires sur l'array numpy
         if random.random() < 0.3:
             image_np = self.horizontal_crop(image_np)
-
-        # 2.2 Augmentations photométriques
         image_np = self.ink_variation(image_np)
         image_np = self.paper_noise(image_np)
-
-        # 2.3 Déformations géométriques
         if random.random() < 0.5:
             image_np = self.elastic(image_np)
 
-        # 3. Conversion en tenseur et application des dernières transformations
-        # On passe par PIL pour utiliser les transformations de torchvision
+        # 3. Reconversion en PIL pour les transformations torchvision
         image_pil = Image.fromarray((image_np * 255).astype(np.uint8))
         
         final_tensor = transforms.Compose([
             self.geometric_transforms,
             self.photometric_transforms,
-            transforms.ToTensor(), # Normalise à [0, 1] et met [C, H, W]
-            transforms.Normalize(mean=[0.5], std=[0.5]) # Normalise à [-1, 1]
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.5], std=[0.5])
         ])(image_pil)
         
         return final_tensor
