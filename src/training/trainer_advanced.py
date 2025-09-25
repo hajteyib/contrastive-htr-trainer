@@ -111,7 +111,7 @@ class AdvancedTrainer:
         pbar = tqdm(self.train_dataloader, desc=f"Epoch {self.current_epoch} Training", leave=False)
         
         for batch_views in pbar:
-            if batch_views is None: continue
+            if batch_views is None: continue 
             
             # Extraire les vues et les cibles
             views = [v.to(self.device) for v in batch_views[:-2]]

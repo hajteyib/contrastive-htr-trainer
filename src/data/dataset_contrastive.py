@@ -94,21 +94,32 @@ class MultiViewDataset(Dataset):
 
     def __len__(self) -> int: return len(self.image_paths)
 
-    def __getitem__(self, idx: int):
+    def __getitem__(self, idx: int) -> Optional[tuple]:
         image_path = self.image_paths[idx]
         try:
             image = Image.open(image_path).convert("L")
-            
             views = [gen(image) for gen in self.view_generators]
             
             width_ratio = torch.tensor([image.width / self.config['data']['target_height']], dtype=torch.float32)
             density = torch.tensor([1 - (np.array(image).astype(np.float32) / 255.0).mean()], dtype=torch.float32)
-
+            
             return tuple(views) + (width_ratio, density)
         except Exception as e:
-            print(f"ERREUR au chargement de {image_path}: {e}")
-            return self.__getitem__(random.randint(0, len(self) - 1))
-
+            # CORRECTION : Ne pas faire d'appel récursif. Retourner None.
+            print(f"ERREUR au chargement de {image_path}: {e}. Échantillon ignoré.")
+            return None
+def safe_collate(batch):
+    """Un collate_fn qui filtre les None avant de créer le batch."""
+    # Filtrer les échantillons qui ont retourné None
+    batch = [item for item in batch if item is not None]
+    
+    # S'il ne reste aucun échantillon valide dans le batch, on retourne None
+    if not batch:
+        return None
+    
+    # Sinon, on utilise le collate par défaut de PyTorch
+    return torch.utils.data.default_collate(batch)
+# --- MODIFICATION END HERE ---
 def create_contrastive_dataloaders(config: Dict, smoke_test: bool):
     """Crée les DataLoaders pour l'entraînement contrastif."""
     data_cfg = config['data']
@@ -116,8 +127,10 @@ def create_contrastive_dataloaders(config: Dict, smoke_test: bool):
     val_dataset = MultiViewDataset(data_cfg['data_list_file'], 'val', config, smoke_test)
     
     train_loader = DataLoader(train_dataset, batch_size=data_cfg['batch_size'], shuffle=True, 
-                              num_workers=data_cfg['num_workers'], pin_memory=True, drop_last=True)
+                              num_workers=data_cfg['num_workers'], pin_memory=True, drop_last=True,
+                              collate_fn=safe_collate)
     val_loader = DataLoader(val_dataset, batch_size=data_cfg['batch_size'], 
-                            num_workers=data_cfg['num_workers'] // 2, pin_memory=True)
+                            num_workers=data_cfg['num_workers'] // 2, pin_memory=True,
+                            collate_fn=safe_collate) 
                              
     return train_loader, val_loader
