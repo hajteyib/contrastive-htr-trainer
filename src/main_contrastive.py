@@ -39,7 +39,7 @@ def main(cfg: DictConfig) -> None:
     torch.manual_seed(cfg.get('seed', 42))
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    model = ConfigurableEncoder(cfg.model).to(device)
+    model = ConfigurableEncoder(cfg).to(device)
     logging.info(f"🧠 Modèle créé ({sum(p.numel() for p in model.parameters()):,} paramètres).")
 
     if cfg.advanced.get('compile_model', False):

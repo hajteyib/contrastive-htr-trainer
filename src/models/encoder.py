@@ -57,11 +57,17 @@ class CBAM(nn.Module):
 class ConfigurableEncoder(nn.Module):
     """
     Architecture ResNet34 modifiée, configurable pour les expériences.
+    Prend la configuration complète pour accéder à toutes les sections nécessaires.
     """
     def __init__(self, config: Dict):
         super().__init__()
-        self.config = config
+        # On stocke la configuration complète pour y accéder facilement
+        self.config = config 
         
+        # --- Récupération des sous-configurations ---
+        model_config = self.config['model']
+        loss_config = self.config['loss']
+
         # --- Backbone ResNet34 ---
         backbone = resnet34(weights=ResNet34_Weights.IMAGENET1K_V1)
         self.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
@@ -77,7 +83,7 @@ class ConfigurableEncoder(nn.Module):
         self.pool3 = nn.MaxPool2d(kernel_size=(2, 1), stride=(2, 1))
 
         # --- Module d'Attention (Configurable) ---
-        attention_type = self.config.get('attention_type', 'none').lower()
+        attention_type = model_config.get('attention_type', 'none').lower()
         if attention_type == 'cbam':
             self.attention = CBAM(512)
         elif attention_type == 'se':
@@ -86,7 +92,7 @@ class ConfigurableEncoder(nn.Module):
             self.attention = nn.Identity()
             
         # --- Tête de Projection Profonde (Configurable) ---
-        head_config = self.config['projection_head']
+        head_config = model_config['projection_head']
         layers = []
         input_dim = 512 # Sortie de Layer4 et Attention
         
@@ -103,9 +109,9 @@ class ConfigurableEncoder(nn.Module):
             
         self.projection_head = nn.Sequential(*layers)
         
-        # --- Têtes pour les Loss Auxiliaires ---
-        self.width_predictor = nn.Linear(512, 1) if self.config['loss'].get('lambda_width', 0) > 0 else nn.Identity()
-        self.density_predictor = nn.Linear(512, 1) if self.config['loss'].get('lambda_density', 0) > 0 else nn.Identity()
+        # --- Têtes pour les Loss Auxiliaires (liées à la config de la loss) ---
+        self.width_predictor = nn.Linear(512, 1) if loss_config.get('lambda_width', 0) > 0 else nn.Identity()
+        self.density_predictor = nn.Linear(512, 1) if loss_config.get('lambda_density', 0) > 0 else nn.Identity()
 
     def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
         # x est une vue [B, 1, H, W]

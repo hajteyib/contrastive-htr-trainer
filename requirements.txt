@@ -45,3 +45,5 @@ tensorboard>=2.8.0
 # Jupyter notebook support (optional)
 # jupyter>=1.0.0
 # ipywidgets>=7.6.0
+hydra-core
+tensorboard
