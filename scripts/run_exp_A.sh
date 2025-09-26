@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # --- HEADER SLURM ---
+# (Le header est parfait, aucun changement)
 #SBATCH --job-name=exp_A_baseline
 #SBATCH --output=slurm_logs/exp_A_baseline_%j.out
 #SBATCH --error=slurm_logs/exp_A_baseline_%j.err
@@ -13,30 +14,30 @@
 #SBATCH --mail-type=ALL
 #SBATCH --licenses=sps
 
-# --- SCRIPT D'EXÉCUTION DIRECT ---
+# --- SCRIPT D'EXÉCUTION ROBUSTE ---
+set -euxo pipefail # C'est une bonne pratique de garder ceci
 
-# Créer le dossier de logs Slurm
 mkdir -p slurm_logs
 
-echo "--- Démarrage du Job ---"
+echo "--- Job Information ---"
 echo "Job ID: $SLURM_JOB_ID | Node: $SLURMD_NODENAME"
+echo "-----------------------"
 
-# 1. Préparation de l'environnement
-echo "Activation de l'environnement..."
+# --- NOUVEAUTÉ : Se déplacer dans le répertoire du projet ---
+# La variable $SLURM_SUBMIT_DIR contient le chemin d'où vous avez lancé sbatch
+cd $SLURM_SUBMIT_DIR
+echo "Répertoire de travail : $(pwd)"
+
+# Préparation de l'environnement
+echo "Chargement du module Python..."
 module purge
 module load python
+
+echo "Activation de l'environnement virtuel..."
 source /sps/liris/eebou/htr_env/bin/activate
 
+# Lancement de l'Expérience
 echo "Lancement de l'Expérience A..."
-echo "--- DEBUT DE LA SORTIE PYTHON ---"
+python src/main_contrastive.py --config-name=exp_A_baseline
 
-### CORRECTION FINALE ###
-# On utilise la syntaxe attendue par Hydra :
-# --config-path : Le dossier où se trouvent TOUS les fichiers de config.
-# --config-name : Le NOM du fichier de config à utiliser (sans le .yaml).
-python src/main_contrastive.py --config-name exp_A_baseline
-
-
-
-echo "--- FIN DE LA SORTIE PYTHON ---"
 echo "Fin du job."
