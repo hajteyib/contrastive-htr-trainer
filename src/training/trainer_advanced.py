@@ -1,4 +1,4 @@
-# Fichier : src/training/trainer_advanced.py
+# Fichier : src/training/trainer_advanced.py (VERSION FINALE, SYNCHRONISÉE AVEC LE DATASET)
 
 import torch
 import torch.optim as optim
@@ -23,11 +23,14 @@ def calculate_contrastive_accuracy(model, dataloader, device, use_amp):
     total_correct, total_samples = 0, 0
     num_batches_to_eval = min(50, len(dataloader))
     
-    for i, batch_views in enumerate(tqdm(dataloader, desc="Calculating Accuracy", leave=False, total=num_batches_to_eval)):
+    for i, batch in enumerate(tqdm(dataloader, desc="Calculating Accuracy", leave=False, total=num_batches_to_eval)):
         if i >= num_batches_to_eval: break
-        if batch_views is None: continue
+        if batch is None: continue
         
-        view1, view2 = batch_views[0].to(device), batch_views[1].to(device)
+        # --- CORRECTION ---
+        # On accède aux vues via la clé 'views' du dictionnaire
+        views = batch['views']
+        view1, view2 = views[0].to(device), views[1].to(device)
         batch_size = view1.size(0)
         if batch_size < 2: continue
 
@@ -49,37 +52,26 @@ def calculate_contrastive_accuracy(model, dataloader, device, use_amp):
 
 
 class AdvancedTrainer:
+    # ... (__init__ et _setup_phase ne changent pas, ils sont déjà corrects) ...
     def __init__(self, model: ConfigurableEncoder, train_dataloader: DataLoader, val_dataloader: DataLoader, 
                  config: Dict, output_dir: Path, log_dir: Path):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.model = model
-        self.train_dataloader = train_dataloader
-        self.val_dataloader = val_dataloader
-        self.config = config
-        self.output_dir = output_dir
-        
+        self.model = model; self.train_dataloader = train_dataloader; self.val_dataloader = val_dataloader
+        self.config = config; self.output_dir = output_dir
         self.criterion = CompositeLoss(config).to(self.device)
         self.optimizer = torch.optim.AdamW(self.model.parameters())
         self.scheduler = None
         self.use_amp = config['advanced'].get('use_amp', True)
         self.scaler = GradScaler(enabled=self.use_amp)
-        
         self.momentum_encoder = copy.deepcopy(self.model)
         for param in self.momentum_encoder.parameters(): param.requires_grad = False
         self.momentum = 0.996
-        
         projection_dim = config['model']['projection_head']['layers'][-1]['dim']
-        self.queue = EnhancedMomentumQueue(
-            dim=projection_dim,
-            queue_size=config['loss'].get('queue_size', 16384),
-            diversity_threshold=0.95
-        )
-        
+        self.queue = EnhancedMomentumQueue(dim=projection_dim, queue_size=config['loss'].get('queue_size', 16384), diversity_threshold=0.95)
         self.current_epoch = 0
         self.checkpoint_dir = self.output_dir / "checkpoints"
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         self.logger = logging.getLogger(__name__)
-
         es_config = self.config['training'].get('early_stopping', {})
         self.es_enabled = es_config.get('enabled', True)
         self.es_patience = es_config.get('patience', 15)
@@ -93,28 +85,32 @@ class AdvancedTrainer:
         self.logger.info(f"--- Démarrage de la Phase d'Entraînement : {phase_config['name']} ---")
         lr = float(phase_config['learning_rate'])
         self.momentum = float(phase_config.get('momentum', self.momentum))
-        
         self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=lr, weight_decay=float(self.config['optimizer']['weight_decay']))
-        
         num_epochs_in_phase = phase_config['epochs']
         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=num_epochs_in_phase * len(self.train_dataloader), eta_min=1e-6)
-        
         if 'loss_weights' in phase_config:
             self.criterion.lambda_contrast = float(phase_config['loss_weights'].get('contrast', 1.0))
             self.criterion.lambda_width = float(phase_config['loss_weights'].get('width', 0.0))
             self.criterion.lambda_density = float(phase_config['loss_weights'].get('density', 0.0))
+    
+    @torch.no_grad()
+    def _update_momentum_encoder(self):
+        for param_q, param_k in zip(self.model.parameters(), self.momentum_encoder.parameters()):
+            param_k.data = param_k.data * self.momentum + param_q.data * (1. - self.momentum)
 
     def train_epoch(self):
         self.model.train()
         epoch_losses = defaultdict(list)
         pbar = tqdm(self.train_dataloader, desc=f"Epoch {self.current_epoch} Training", leave=False)
         
-        for batch_views in pbar:
-            if batch_views is None: continue
+        for batch in pbar:
+            if batch is None: continue
             
-            views = [v.to(self.device) for v in batch_views[:-2]]
-            target_widths = batch_views[-2].to(self.device)
-            target_densities = batch_views[-1].to(self.device)
+            # --- CORRECTION ---
+            # On accède aux données via les clés du dictionnaire
+            views = [v.to(self.device) for v in batch['views']]
+            target_widths = batch['target_width'].to(self.device)
+            target_densities = batch['target_density'].to(self.device)
 
             with autocast(enabled=self.use_amp):
                 num_views = len(views)
@@ -140,30 +136,35 @@ class AdvancedTrainer:
             self.scaler.step(self.optimizer)
             self.scaler.update()
             
-            # --- CORRECTION : Utiliser la bonne variable ---
-            # `outputs` est défini dans la boucle et accessible ici.
+            if self.scheduler: self.scheduler.step()
+            
             self.queue.update(outputs[0]['features'])
             
-            # --- CORRECTION : Utiliser la bonne variable ---
-            # `loss_dict` est défini dans la boucle et accessible ici.
             for key, value in loss_dict.items(): epoch_losses[key].append(value.item())
             pbar.set_postfix({k: f"{v.item():.3f}" for k, v in loss_dict.items() if isinstance(v, torch.Tensor)})
 
-        if self.scheduler: self.scheduler.step()
         return {key: np.mean(values) for key, values in epoch_losses.items()}
 
     def validate_epoch(self):
         self.model.eval()
-        val_losses = defaultdict(list)
+        val_metrics = {}
         
-        # --- CALCUL DE LA VAL LOSS ---
+        self.logger.info("Calcul de la précision contrastive sur le set de validation...")
+        acc = calculate_contrastive_accuracy(self.model, self.val_dataloader, self.device, self.use_amp)
+        val_metrics['val_contrastive_acc'] = acc
+
+        # On ajoute un calcul de Val Loss pour le monitoring
+        val_losses = defaultdict(list)
         with torch.no_grad():
-            for batch_views in tqdm(self.val_dataloader, desc="Calculating Val Loss", leave=False):
-                if batch_views is None: continue
+            # On ne prend qu'un petit sous-ensemble pour une estimation rapide de la loss
+            num_batches_to_eval = min(50, len(self.val_dataloader))
+            for i, batch in enumerate(self.val_dataloader):
+                if i >= num_batches_to_eval: break
+                if batch is None: continue
                 
-                views = [v.to(self.device) for v in batch_views[:-2]]
-                target_widths = batch_views[-2].to(self.device)
-                target_densities = batch_views[-1].to(self.device)
+                views = [v.to(self.device) for v in batch['views']]
+                target_widths = batch['target_width'].to(self.device)
+                target_densities = batch['target_density'].to(self.device)
                 
                 with autocast(enabled=self.use_amp):
                     num_views = len(views)
@@ -180,17 +181,12 @@ class AdvancedTrainer:
 
                     loss_dict = self.criterion(anchor_projs, pos_projs, pred_widths, pred_densities,
                                                target_widths, target_densities, self.queue.get_negatives(self.device))
+                for key, value in loss_dict.items(): val_losses[key].append(value.item())
 
-                for key, value in loss_dict.items():
-                    val_losses[key].append(value.item())
-
-        val_metrics = {f"val_{key}": np.mean([v for v in values if not np.isnan(v)]) for key, values in val_losses.items()}
+        for key, values in val_losses.items():
+            val_metrics[f"val_{key}"] = np.mean([v for v in values if not np.isnan(v)])
         
-        # --- CALCUL DE LA VAL ACCURACY ---
-        self.logger.info("Calculating Contrastive Accuracy...")
-        contrastive_acc = calculate_contrastive_accuracy(self.model, self.val_dataloader, self.device, self.use_amp)
-        val_metrics['val_contrastive_acc'] = contrastive_acc
-        
+        self.logger.info(f"📊 Val Loss (estimée): {val_metrics.get('val_total_loss', 'N/A'):.4f} | Val Acc: {val_metrics.get('val_contrastive_acc', 'N/A'):.2f}%")
         return val_metrics
 
     def save_checkpoint(self, is_best=False):
